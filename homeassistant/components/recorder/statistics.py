@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError, StatementError
 from sqlalchemy.ext import baked
 from sqlalchemy.orm.scoping import scoped_session
 from sqlalchemy.sql.expression import literal_column, true
+import voluptuous as vol
 
 from homeassistant.const import (
     PRESSURE_PA,
@@ -163,6 +164,14 @@ def valid_statistic_id(statistic_id: str) -> bool:
     Format: <domain>:<statistic> where both are slugs.
     """
     return VALID_STATISTIC_ID.match(statistic_id) is not None
+
+
+def validate_statistic_id(value: str) -> str:
+    """Validate statistic ID."""
+    if valid_statistic_id(value):
+        return value
+
+    raise vol.Invalid(f"Statistics ID {value} is an invalid statistic ID")
 
 
 @dataclasses.dataclass
@@ -577,6 +586,30 @@ def compile_statistics(instance: Recorder, start: datetime) -> bool:
     return True
 
 
+def _adjust_sum_statistics(
+    session: scoped_session,
+    table: type[Statistics | StatisticsShortTerm],
+    metadata_id: int,
+    start_time: datetime,
+    adj: float,
+) -> None:
+    """Adjust statistics in the database."""
+    try:
+        session.query(table).filter_by(metadata_id=metadata_id).filter(
+            table.start >= start_time
+        ).update(
+            {
+                table.sum: table.sum + adj,
+            },
+            synchronize_session=False,
+        )
+    except SQLAlchemyError:
+        _LOGGER.exception(
+            "Unexpected exception when updating statistics %s",
+            id,
+        )
+
+
 def _insert_statistics(
     session: scoped_session,
     table: type[Statistics | StatisticsShortTerm],
@@ -616,7 +649,7 @@ def _update_statistics(
     except SQLAlchemyError:
         _LOGGER.exception(
             "Unexpected exception when updating statistics %s:%s ",
-            id,
+            stat_id,
             statistic,
         )
 
@@ -1256,7 +1289,7 @@ def add_external_statistics(
     metadata: StatisticMetaData,
     statistics: Iterable[StatisticData],
 ) -> bool:
-    """Process an add_statistics job."""
+    """Process an add_external_statistics job."""
 
     with session_scope(
         session=instance.get_session(),  # type: ignore
@@ -1270,5 +1303,33 @@ def add_external_statistics(
                 _update_statistics(session, Statistics, stat_id, stat)
             else:
                 _insert_statistics(session, Statistics, metadata_id, stat)
+
+    return True
+
+
+@retryable_database_job("adjust_statistics")
+def adjust_statistics(
+    instance: Recorder,
+    statistic_id: str,
+    start_time: datetime,
+    sum_adjustment: float,
+    table: str,
+) -> bool:
+    """Process an add_statistics job."""
+
+    with session_scope(session=instance.get_session()) as session:  # type: ignore
+        metadata = get_metadata_with_session(
+            instance.hass, session, statistic_ids=(statistic_id,)
+        )
+        if statistic_id not in metadata:
+            return True
+
+        _adjust_sum_statistics(
+            session,
+            Statistics if table == "statistics" else StatisticsShortTerm,
+            metadata[statistic_id][0],
+            start_time,
+            sum_adjustment,
+        )
 
     return True
