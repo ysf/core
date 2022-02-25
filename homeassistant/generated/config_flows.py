@@ -384,7 +384,6 @@ FLOWS = [
     "youless",
     "zerproc",
     "zha",
-    "zwave",
     "zwave_js",
     "zwave_me"
 ]
