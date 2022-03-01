@@ -281,6 +281,7 @@ FLOWS = [
     "ruckus_unleashed",
     "samsungtv",
     "screenlogic",
+    "season",
     "sense",
     "senseme",
     "sensibo",
