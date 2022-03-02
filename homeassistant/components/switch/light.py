@@ -69,8 +69,6 @@ async def async_setup_entry(
 
     registry = er.async_get(hass)
     entity_id = er.async_resolve_entity(registry, config_entry.options[CONF_ENTITY_ID])
-    if not entity_id:
-        return
 
     async_add_entities(
         [
